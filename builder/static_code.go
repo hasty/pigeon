@@ -332,8 +332,8 @@ type (
 
 // {{ if .Nolint }} nolint: structcheck {{else}} ==template== {{ end }}
 type ruleRefExpr struct {
-	pos  position
-	name string
+	pos    position
+	offset int
 }
 
 // ==template== {{ if or .GlobalState (not .Optimize) }}
@@ -542,8 +542,8 @@ type parser struct {
 	memo map[int]map[any]resultTuple
 	// {{ end }} ==template==
 
-	// rules table, maps the rule identifier to the rule node
-	rules map[string]*rule
+	// rules table, maps the rule offset to the rule node
+	rules []*rule
 	// variables stack, map of label to value
 	vstack []map[string]any
 	// rule stack, allows identification of the current rule in errors
@@ -821,13 +821,6 @@ func (p *parser) setMemoized(pt savepoint, node any, tuple resultTuple) {
 
 // {{ end }} ==template==
 
-func (p *parser) buildRulesTable(g *grammar) {
-	p.rules = make(map[string]*rule, len(g.rules))
-	for _, r := range g.rules {
-		p.rules[r.name] = r
-	}
-}
-
 // {{ if .Nolint }} nolint: gocyclo {{else}} ==template== {{ end }}
 func (p *parser) parse(g *grammar) (val any, err error) {
 	if len(g.rules) == 0 {
@@ -836,7 +829,7 @@ func (p *parser) parse(g *grammar) (val any, err error) {
 	}
 
 	// TODO : not super critical but this could be generated
-	p.buildRulesTable(g)
+	p.rules = g.rules
 
 	if p.recover {
 		// panic can be used in action code to stop parsing immediately
@@ -860,13 +853,20 @@ func (p *parser) parse(g *grammar) (val any, err error) {
 		}()
 	}
 
-	startRule, ok := p.rules[p.entrypoint]
-	if !ok {
+	var startRule *rule
+	for _, r := range p.rules {
+		if r.name == p.entrypoint {
+			startRule = r
+			break
+		}
+	}
+	if startRule == nil {
 		p.addErr(errInvalidEntrypoint)
 		return nil, p.errs.err()
 	}
 
 	p.read() // advance to first rune
+	var ok bool
 	val, ok = p.parseRuleWrap(startRule)
 	if !ok {
 		if len(*p.errs) == 0 {
@@ -1497,15 +1497,11 @@ func (p *parser) parseRuleRefExpr(ref *ruleRefExpr) (any, bool) {
 	}
 
 	// {{ end }} ==template==
-	if ref.name == "" {
-		panic(fmt.Sprintf("%s: invalid rule: missing name", ref.pos))
+	if ref.offset > len(p.rules) - 1 {
+		panic(fmt.Sprintf("%s: invalid rule: out of range", ref.pos))
 	}
 
-	rule := p.rules[ref.name]
-	if rule == nil {
-		p.addErr(fmt.Errorf("undefined rule: %s", ref.name))
-		return nil, false
-	}
+	rule := p.rules[ref.offset]
 	return p.parseRuleWrap(rule)
 }
 

@@ -131,9 +131,10 @@ type builder struct {
 	supportLeftRecursion  bool
 	haveLeftRecursion     bool
 
-	ruleName  string
-	exprIndex int
-	argsStack [][]string
+	ruleName    string
+	ruleOffsets map[string]int
+	exprIndex   int
+	argsStack   [][]string
 
 	rangeTable bool
 }
@@ -179,6 +180,15 @@ func (b *builder) writeGrammar(g *ast.Grammar) {
 	// of the parser-generator grammar.
 	b.writelnf("var g = &grammar {")
 	b.writelnf("\trules: []*rule{")
+	b.ruleOffsets = make(map[string]int, len(g.Rules))
+	counter := 0
+	for _, r := range g.Rules {
+		if r == nil || r.Name == nil {
+			continue
+		}
+		b.ruleOffsets[r.Name.Val] = counter
+		counter++
+	}
 	for _, r := range g.Rules {
 		b.writeRule(r)
 	}
@@ -524,7 +534,10 @@ func (b *builder) writeRuleRefExpr(ref *ast.RuleRefExpr) {
 	pos := ref.Pos()
 	b.writelnf("\tpos: position{line: %d, col: %d, offset: %d},", pos.Line, pos.Col, pos.Off)
 	if ref.Name != nil && ref.Name.Val != "" {
-		b.writelnf("\tname: %q,", ref.Name.Val)
+		offset, ok := b.ruleOffsets[ref.Name.Val]
+		if ok {
+			b.writelnf("\toffset: %d,", offset)
+		}
 	}
 	b.writelnf("},")
 }
